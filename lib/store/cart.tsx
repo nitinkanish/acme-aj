@@ -1,6 +1,8 @@
-import type React from "react"
+"use client"
+
+import React, { Suspense } from "react"
 import { create } from "zustand"
-import { persist } from "zustand/middleware"
+import { persist, createJSONStorage } from "zustand/middleware"
 
 export interface CartItem {
   productId: number
@@ -14,6 +16,8 @@ export interface CartItem {
 
 interface CartState {
   items: CartItem[]
+  _hasHydrated: boolean
+  setHasHydrated: (state: boolean) => void
   addItem: (item: CartItem) => void
   removeItem: (productId: number, variationId?: number) => void
   updateQuantity: (productId: number, quantity: number, variationId?: number) => void
@@ -25,6 +29,12 @@ export const useCart = create<CartState>()(
   persist(
     (set, get) => ({
       items: [],
+      _hasHydrated: false,
+      setHasHydrated: (state) => {
+        set({
+          _hasHydrated: state,
+        })
+      },
       addItem: (item) =>
         set((state) => {
           const existing = state.items.find((i) => i.productId === item.productId && i.variationId === item.variationId)
@@ -57,10 +67,31 @@ export const useCart = create<CartState>()(
     }),
     {
       name: "cart-storage",
+      storage: createJSONStorage(() => (typeof window !== "undefined" ? localStorage : ({} as Storage))),
+      skipHydration: true,
     },
   ),
 )
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
-  return <>{children}</>
+  React.useEffect(() => {
+    // Manually trigger rehydration when skipHydration is true
+    // This ensures localStorage is only accessed on the client side
+    const unsubscribe = useCart.persist.onFinishHydration(() => {
+      useCart.getState().setHasHydrated(true)
+    })
+    
+    // Trigger rehydration - Zustand persist with skipHydration requires manual rehydration
+    if (typeof window !== "undefined") {
+      useCart.persist.rehydrate()
+    }
+    
+    return unsubscribe
+  }, [])
+
+  return (
+    <Suspense fallback={<div className="min-h-screen">test</div>}>
+      {children}
+    </Suspense>
+  )
 }
